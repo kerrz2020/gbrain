@@ -373,6 +373,11 @@ export function renderSessionParts(
       type: 'conversation',
       title: of > 1 ? `${title} (part ${part} of ${of})` : title,
       date: dateIso.slice(0, 10),
+      // Locally required frontmatter (the brain's unified-agent-protocol gate
+      // checks type/title/date/tags/ai-first before a page may be committed):
+      // an archive page without them fails `fm-check.py` on the way in.
+      tags: ['conversation', meta.harness, 'transcript-archive'],
+      'ai-first': true,
       id: frontmatterId,
       transcript_import: {
         harness: meta.harness,
