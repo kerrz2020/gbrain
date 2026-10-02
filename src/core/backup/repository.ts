@@ -99,7 +99,7 @@ export async function assessBackupRepository(
         '-c', 'protocol.https.allow=always', '-c', 'protocol.http.allow=always', '-c', 'protocol.ssh.allow=always',
         '-c', 'http.followRedirects=false', '-c', 'credential.interactive=false', 'ls-remote', '--exit-code', '--refs', 'origin', ref], {
         encoding: 'utf8', timeout: Math.min(BACKUP_REMOTE_TIMEOUT_MS, remainingMs), maxBuffer: 64 * 1024,
-        env: { ...GIT_ENV, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '', SSH_ASKPASS_REQUIRE: 'never', GIT_SSH_COMMAND: 'ssh -oBatchMode=yes -oStrictHostKeyChecking=yes -oConnectTimeout=2' },
+        env: { ...process.env, ...GIT_ENV, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '', SSH_ASKPASS_REQUIRE: 'never', GIT_SSH_COMMAND: 'ssh -oBatchMode=yes -oStrictHostKeyChecking=yes -oConnectTimeout=2' },
       }, (error, stdout) => error ? reject(error) : resolve(stdout));
     }).catch(error => {
       asset.verification = { state: error.code === 2 ? 'missing_ref' : 'unavailable', checked_at: now.toISOString(), repository_fingerprint: fingerprint };
