@@ -17,6 +17,8 @@ triggers:
   - "populate timeline"
   - "populate links"
   - "backfill graph"
+  - "unlinked atoms"
+  - "connect the graph"
   - "extract timeline entries"
   - "retriage the backlog"
   - "re-score the triage"
@@ -119,6 +121,77 @@ Pages where compiled_truth is older than the latest timeline entry. The assessme
 Pages with zero inbound links. Nobody references them.
 - Review orphans: are they genuinely isolated or just missing links?
 - Add links in gbrain from related pages or flag for deletion
+
+#### Isolated atoms are expected — don't chase zero orphans
+
+`atom` (plus `conversation`, `source`) is hardcoded in
+`NON_LINKABLE_PAGE_TYPES`, and `atoms/` sits in `FIRST_SEGMENT_EXCLUSIONS`
+(`src/core/orphan-policy.ts`). So atoms are excluded from
+`total_linkable` **by design** — linking them never changes the
+`excluded` count; only a core fork would, and it would then count every
+isolated atom as an orphan and *lower* the health score. Treat the
+exclusion as a feature.
+
+Why atoms end up with zero links: `synthesize_concepts` skips any concept
+group with fewer than 2 atoms (`TIER_T3_MIN`), while `extract_atoms` asks
+the model to invent kebab-case topic labels with no reuse of existing
+concept slugs — so most labels appear exactly once, get no concept page,
+and the atom keeps no edge. Re-running `gbrain dream --phase
+synthesize_concepts` is idempotent and changes nothing in that case.
+
+A leftover only heals itself when a *later* atom invents the **identical**
+kebab label (that is all `synthesize_concepts` groups by — it never compares
+meaning). So don't tell the user the isolated pages will "auto-link once more
+knowledge arrives"; say they will if and only if two atoms happen to pick the
+same exact label. Leaving them is still correct — they stay fully queryable.
+
+Do NOT attach the leftovers to the nearest concept by embedding
+similarity: below ~0.6 the nearest hit is visibly wrong (a headless-browser
+atom landing on `shell-path-resolution`). Similarity may propose; an LLM
+judge that must confirm the *same mechanism* decides (see
+`skills/concept-synthesis/SKILL.md` — distinctness guard is a hard veto).
+Also note `synthesized_from`/`synthesizes` (the type used by the
+pipeline's own concept-provenance edges) is NOT declared in
+`gbrain-base-v2-atoms`; public `gbrain link` rejects it.
+
+#### Attaching judged edges in bulk
+
+When the user wants isolated pages linked, work propose → judge → apply. A
+similarity score never writes an edge.
+
+1. **Propose in SQL.** pgvector is already in the DB, so rank each page's
+   candidates with `1 - (a.embedding <=> b.embedding)` (top-2 is enough) and
+   write the rows to a TSV in scratch. The ranking is a candidate list, not
+   a verdict.
+2. **Judge every row** by the rule for the link type being written
+   (`discusses` = "this page is about that topic"); an actual page *merge*
+   additionally needs the affirmative same-mechanism verdict from the
+   distinctness guard. Skip rows where no candidate shares the page's
+   subsystem — leaving a page isolated is a valid outcome, and the count of
+   skipped rows belongs in the report. When the top two candidates disagree,
+   take the more specific concept, not the higher score.
+3. **Record verdicts as `<row-number> <target-slug>`**, keyed to the proposal
+   file's line order, so 70-character slugs are never retyped — retyping is
+   where a bulk write silently attaches the wrong edge.
+4. **Apply with a re-runnable script** that defaults to dry-run, asserts the
+   proposal/verdict shape before writing, and prints applied/failed counts.
+   Safe to re-run because `gbrain link` is idempotent.
+5. **Verify, then hand over the revert.** Re-count the isolated pages, walk
+   one changed page with `gbrain graph <slug> --depth 1`, and state the undo:
+   one `delete from links where link_source = '<batch-source>'`, or
+   `gbrain unlink <from> <to> --link-source <batch-source>` per edge.
+
+Put the whole batch under ONE distinctive `link_source` (e.g.
+`atom-concept-attach`) — that field is what makes the batch auditable and
+reversible in one statement.
+
+Before scripting N writes, **run one link and read the error**: `gbrain link`
+refuses link types the active pack does not declare, and the error enumerates
+what is declared. Check that first; N failed writes in a loop costs more
+than the one probe.
+
+Recipe with the proposer SQL, the applier script and the revert:
+`references/judged-bulk-edge-repair.md`.
 
 ### Dead links
 Links pointing to pages that don't exist.
